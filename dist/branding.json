@@ -1,0 +1,13 @@
+{
+  "companyName": "AlsisGuard",
+  "productTitle": "Instalador del agente del SIEM",
+  "subtitle": "Despliegue del agente",
+  "defaultManagerIp": "",
+  "lockManagerIp": false,
+  "primaryColor": "#172A45",
+  "accentColor": "#5EC8E5",
+  "headerColor": "#FFFFFF",
+  "managerLabel": "IP o dominio del sistema central",
+  "supportText": "Soporte: oficina@alsisiot.com",
+  "logoFile": "logo.png"
+}

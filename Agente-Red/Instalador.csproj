@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Proyecto de Visual Studio (opcional). Alternativa a build.ps1.
+  El script de instalacion (Resources\Instalador-Suricata-Windows.ps1) se
+  embebe como recurso; el .exe lo extrae y ejecuta en tiempo de instalacion.
+-->
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{B7E1A2C4-9F3D-4E6A-8B21-000000000002}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>SuricataNetAgentInstaller</RootNamespace>
+    <AssemblyName>InstaladorSuricata</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+    <ApplicationManifest>src\app.manifest</ApplicationManifest>
+    <OutputPath>dist\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="src\Program.cs" />
+    <Compile Include="src\MainForm.cs" />
+    <Compile Include="src\Branding.cs" />
+    <Compile Include="src\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Instalador-Suricata-Windows.ps1">
+      <LogicalName>Instalador-Suricata-Windows.ps1</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\logo.png">
+      <LogicalName>logo.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\app.ico">
+      <LogicalName>app.ico</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

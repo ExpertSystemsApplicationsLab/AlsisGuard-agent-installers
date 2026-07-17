@@ -246,45 +246,56 @@ namespace WazuhAgentInstaller
                 string msiPath = ExtractMsi();
                 Log("MSI preparado en: " + msiPath);
 
-                // Aviso si ya hay una instalacion previa (causa habitual del error 1603).
-                if (Directory.Exists(@"C:\Program Files (x86)\ossec-agent") ||
-                    Directory.Exists(@"C:\Program Files\ossec-agent"))
+                // 1) Ver el estado actual del equipo.
+                bool folder = InstallDir() != null;
+                bool service = ServiceExists();
+
+                if (folder && service)
                 {
-                    Log("AVISO: se detecto una instalacion previa del agente (carpeta ossec-agent).");
+                    // Ya hay un agente instalado (p.ej. con una IP incorrecta anterior).
+                    // Se ofrece reinstalar limpio para dejarlo correcto.
+                    if (!AskYesNo(
+                            "Ya hay un agente instalado en este equipo.\n\n" +
+                            "Se desinstalara el actual y se instalara de nuevo apuntando a " + ip + ".\n\n" +
+                            "¿Continuar?",
+                            "Agente ya instalado"))
+                    {
+                        Log("Operacion cancelada por el usuario.");
+                        SetStatus("Cancelado.", _brand.Primary);
+                        return;
+                    }
+                    CleanUninstall(msiPath);
+                }
+                else if (folder || service)
+                {
+                    // Restos de una instalacion anterior fallida: se limpian sin preguntar.
+                    Log("Detectados restos de una instalacion anterior. Limpiando automaticamente...");
+                    CleanUninstall(msiPath);
                 }
 
-                string logPath = Path.Combine(Path.GetTempPath(), "wazuh-install.log");
-                try { File.Delete(logPath); } catch { }
-
-                var args = new StringBuilder();
-                args.Append("/i \"").Append(msiPath).Append("\" /qn /norestart");
-                args.Append(" /l*v \"").Append(logPath).Append("\"");
-                args.Append(" WAZUH_MANAGER=\"").Append(ip).Append("\"");
-                args.Append(" WAZUH_REGISTRATION_SERVER=\"").Append(ip).Append("\"");
-                if (!string.IsNullOrEmpty(name))
-                    args.Append(" WAZUH_AGENT_NAME=\"").Append(name).Append("\"");
-
-                Log("Ejecutando msiexec " + args);
-                int code = RunProcess("msiexec.exe", args.ToString());
-                Log("msiexec finalizo con codigo " + code);
-
+                // 2) Instalar. Si falla, limpiar los restos y reintentar UNA vez,
+                //    para que el usuario no tenga que borrar la carpeta ossec-agent a mano.
+                int code = InstallMsi(msiPath, ip, name);
                 if (code != 0 && code != 3010)
                 {
-                    DumpMsiError(logPath);
-                    Log("Log completo en: " + logPath);
+                    Log("La instalacion fallo (codigo " + code + "). Limpiando restos y reintentando...");
+                    CleanUninstall(msiPath);
+                    code = InstallMsi(msiPath, ip, name);
+                }
+                if (code != 0 && code != 3010)
+                {
                     throw new Exception(
-                        "La instalacion del MSI fallo (codigo " + code + ").\n\n" +
-                        "Revisa las lineas de error en el registro de la ventana.\n" +
-                        "Log detallado: " + logPath + "\n\n" +
-                        "Causa mas habitual del 1603: ya existe una instalacion del agente. " +
-                        "Desinstalala primero (Panel de control > Programas, o el desinstalador de Wazuh) " +
-                        "y vuelve a intentarlo.");
+                        "La instalacion del agente fallo (codigo " + code + ") incluso tras limpiar.\n\n" +
+                        "Revisa las lineas de error del registro de la ventana.\n" +
+                        "Causas posibles: un antivirus/EDR bloqueando el servicio, o falta de permisos.");
                 }
 
                 Log("Iniciando servicio " + ServiceName + "...");
                 RunProcess("net.exe", "start " + ServiceName); // no-fatal si ya esta iniciado
 
-                try { File.Delete(msiPath); } catch { }
+                // Borra solo la copia temporal del MSI (no un MSI puesto junto al exe).
+                if (msiPath.StartsWith(Path.GetTempPath(), StringComparison.OrdinalIgnoreCase))
+                    try { File.Delete(msiPath); } catch { }
 
                 SetStatus("Instalacion completada correctamente.", Color.FromArgb(0, 128, 0));
                 Log("Agente instalado y apuntando al manager " + ip + ".");
@@ -326,6 +337,166 @@ namespace WazuhAgentInstaller
 
             throw new Exception("No se encontro el MSI del agente. Debe estar embebido en el .exe o " +
                                 "situado como 'wazuh-agent.msi' junto al ejecutable.");
+        }
+
+        // Posibles carpetas de instalacion del agente.
+        private static readonly string[] InstallDirs =
+        {
+            @"C:\Program Files (x86)\ossec-agent",
+            @"C:\Program Files\ossec-agent"
+        };
+
+        private static string InstallDir()
+        {
+            foreach (var d in InstallDirs)
+                if (Directory.Exists(d)) return d;
+            return null;
+        }
+
+        private bool ServiceExists()
+        {
+            try { return RunProcessQuiet("sc.exe", "query " + ServiceName) == 0; }
+            catch { return false; }
+        }
+
+        // Ejecuta la instalacion del MSI y devuelve el codigo de salida.
+        private int InstallMsi(string msiPath, string ip, string name)
+        {
+            string logPath = Path.Combine(Path.GetTempPath(), "wazuh-install.log");
+            try { File.Delete(logPath); } catch { }
+
+            var args = new StringBuilder();
+            args.Append("/i \"").Append(msiPath).Append("\" /qn /norestart");
+            args.Append(" /l*v \"").Append(logPath).Append("\"");
+            args.Append(" WAZUH_MANAGER=\"").Append(ip).Append("\"");
+            args.Append(" WAZUH_REGISTRATION_SERVER=\"").Append(ip).Append("\"");
+            if (!string.IsNullOrEmpty(name))
+                args.Append(" WAZUH_AGENT_NAME=\"").Append(name).Append("\"");
+
+            Log("Ejecutando msiexec " + args);
+            int code = RunProcess("msiexec.exe", args.ToString());
+            Log("msiexec finalizo con codigo " + code);
+            if (code != 0 && code != 3010)
+            {
+                DumpMsiError(logPath);
+                Log("Log completo en: " + logPath);
+            }
+            return code;
+        }
+
+        // Desinstala por completo cualquier resto del agente: para el servicio,
+        // desinstala el producto (por MSI y por codigo de producto) y borra la
+        // carpeta que quede. Asi el usuario nunca tiene que limpiar a mano.
+        private void CleanUninstall(string msiPath)
+        {
+            Log("Limpiando instalacion previa del agente...");
+
+            RunProcessQuiet("sc.exe", "stop " + ServiceName);
+            Thread.Sleep(2000);
+
+            // Desinstalar por el propio MSI (misma version embebida).
+            string ulog = Path.Combine(Path.GetTempPath(), "wazuh-uninstall.log");
+            RunProcessQuiet("msiexec.exe", "/x \"" + msiPath + "\" /qn /norestart /l*v \"" + ulog + "\"");
+
+            // Desinstalar por codigo de producto del registro (por si la version difiere).
+            foreach (string productCode in FindWazuhProductCodes())
+            {
+                Log("Desinstalando producto " + productCode + " ...");
+                RunProcessQuiet("msiexec.exe", "/x " + productCode + " /qn /norestart");
+            }
+
+            // Eliminar el servicio si aun existiera.
+            RunProcessQuiet("sc.exe", "delete " + ServiceName);
+            Thread.Sleep(1000);
+
+            // Eliminar la carpeta restante.
+            string dir = InstallDir();
+            if (dir != null)
+            {
+                try { Directory.Delete(dir, true); Log("Carpeta eliminada: " + dir); }
+                catch (Exception ex) { Log("Aviso: no se pudo eliminar " + dir + ": " + ex.Message); }
+            }
+
+            Log("Limpieza completada.");
+        }
+
+        // Busca en el registro los codigos de producto (GUID) del agente Wazuh.
+        private System.Collections.Generic.List<string> FindWazuhProductCodes()
+        {
+            var list = new System.Collections.Generic.List<string>();
+            string[] roots =
+            {
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+            };
+            foreach (var root in roots)
+            {
+                try
+                {
+                    using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(root))
+                    {
+                        if (key == null) continue;
+                        foreach (var sub in key.GetSubKeyNames())
+                        {
+                            try
+                            {
+                                using (var k = key.OpenSubKey(sub))
+                                {
+                                    if (k == null) continue;
+                                    var name = k.GetValue("DisplayName") as string;
+                                    if (!string.IsNullOrEmpty(name) &&
+                                        name.IndexOf("Wazuh", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                                        sub.StartsWith("{") && sub.EndsWith("}") &&
+                                        !list.Contains(sub))
+                                    {
+                                        list.Add(sub);
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch { }
+            }
+            return list;
+        }
+
+        // Pregunta Si/No en el hilo de la interfaz.
+        private bool AskYesNo(string message, string title)
+        {
+            bool result = false;
+            Invoke(new Action(() =>
+            {
+                result = MessageBox.Show(this, message, title,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+            }));
+            return result;
+        }
+
+        // Ejecuta un proceso sin volcar su salida al registro; devuelve el codigo.
+        private int RunProcessQuiet(string file, string arguments)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = file,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    p.StandardOutput.ReadToEnd();
+                    p.StandardError.ReadToEnd();
+                    p.WaitForExit();
+                    return p.ExitCode;
+                }
+            }
+            catch { return -1; }
         }
 
         // Lee el log verboso de msiexec y muestra las lineas relevantes del fallo.

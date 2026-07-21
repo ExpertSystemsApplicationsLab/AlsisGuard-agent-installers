@@ -13,6 +13,12 @@ Ambos comparten estilo visual, marca editable y el mismo flujo de
 compilación/firma. Este README cubre **todo el ciclo**: compilar, firmar,
 personalizar, instalar y resolver problemas.
 
+Cada agente está disponible en **dos versiones**: **Windows** (instalador `.exe`
+con ventana, carpetas `Agente-Monitorizacion/` y `Agente-Red/`) y **Linux/UNIX**
+(script `.sh` silencioso, carpetas `Agente-Monitorizacion-Linux/` y
+`Agente-Red-Linux/`). En Linux los agentes se enrolan en el grupo **`unix`**
+(ver sección 6.3).
+
 ---
 
 ## 1. Conceptos básicos
@@ -39,6 +45,10 @@ personalizar, instalar y resolver problemas.
 - Windows 10/11 (incluye el compilador de .NET Framework `csc.exe` y `tar`).
 - No hace falta Visual Studio (se compila con `build.ps1`). Opcionalmente puede
   abrirse `Instalador.sln`.
+- **Solo para el Agente de Monitorización:** Python + PyInstaller
+  (`pip install pyinstaller`), necesarios para compilar los scripts de respuesta
+  activa (`active-response\src\*.py`) a `.exe`. Si no están, `build.ps1` avisa y
+  genera el instalador sin respuesta activa.
 
 **Equipo DESTINO donde se ejecuta el instalador:**
 
@@ -114,6 +124,8 @@ Campos de `branding.json`:
 | `supportText` | Texto de pie (p. ej. datos de soporte). |
 | `logoFile` | Nombre del archivo de logo. |
 | `defaultManagerIp` / `lockManagerIp` | *(Solo Agente de Monitorización)* IP del sistema central precargada, y si se bloquea para que el usuario no la cambie. |
+| `agentGroup` | *(Solo Agente de Monitorización)* Grupo de enrolamiento para recibir la configuración FIM centralizada del manager. Por defecto `windows`. |
+| `suricataEveLog` | *(Solo Agente de Monitorización)* Ruta del `eve.json` de Suricata que recolecta el agente. |
 
 Si estos archivos no están junto al `.exe`, se usan los valores y el logo
 **embebidos por defecto**.
@@ -127,12 +139,30 @@ Si estos archivos no están junto al `.exe`, se usan los valores y el logo
 1. Clic derecho en `InstaladorAgente.exe` → **Ejecutar como administrador**.
 2. Escribir la **IP o dominio del sistema central**.
 3. (Opcional) Ajustar el **nombre del equipo/agente** (por defecto, el del equipo).
-4. Pulsar **Instalar**. El progreso se muestra en la ventana.
+4. (Opcional) Marcar **"Vigilar carpetas extra con FIM"** y escribir una carpeta
+   por línea (se vigilan en tiempo real).
+5. Pulsar **Instalar y configurar agente**. El progreso se muestra en la ventana.
+
+Además de instalar el agente, deja el equipo **listo para respuesta activa**:
+
+- Registra el agente en el grupo `windows` (config FIM centralizada del manager).
+- Copia los binarios de respuesta activa (`netsh-block.exe` para bloquear la IP
+  atacante en el firewall, y `remove-threat.exe` para borrar archivos maliciosos)
+  a `active-response\bin`.
+- Habilita la auditoría de inicios de sesión fallidos (evento **4625**), necesaria
+  para detectar fuerza bruta.
+- Añade al `ossec.conf` la recolección del log de **Suricata** (`eve.json`).
+- Reinicia el servicio y hace un **test de puertos 1514/1515** contra el manager
+  (avisa en el registro si la IP es incorrecta).
 
 El instalador es **autolimpiante**: si ya hay un agente (p. ej. con una IP
 anterior incorrecta), ofrece reinstalarlo limpio; si detecta restos de una
 instalación fallida, los limpia solo; y si la instalación falla, limpia y
 reintenta una vez.
+
+Los scripts de respuesta activa se editan en `Agente-Monitorizacion\active-response\src\`
+(`netsh-block.py`, `remove-threat.py`) y `build.ps1` los recompila a `.exe`
+automáticamente.
 
 ### 6.2 Agente de Red
 
@@ -153,6 +183,49 @@ Qué hace por dentro, de forma automática:
    alertas al sistema central.
 6. Deja el sensor **arrancando automáticamente con Windows** (tarea programada) y
    lo pone en marcha.
+
+### 6.3 Versión Linux/UNIX (scripts `.sh`)
+
+Para equipos **Linux/UNIX** hay dos instaladores en forma de **script silencioso**
+(sin ventana; todo por parámetros), pensados para despliegue masivo. Los agentes
+Linux se enrolan en el grupo **`unix`**. Requieren **root** y `systemd`; el equipo
+necesita acceso a internet para descargar los paquetes.
+
+**Agente de Monitorización (Linux)** — `Agente-Monitorizacion-Linux/install-agent.sh`:
+
+```bash
+sudo ./install-agent.sh -m <IP_DEL_MANAGER> [-n nombre] [-g unix] \
+     [-f "/datos,/var/www"] [--force]
+```
+
+Detecta la distribución (apt/dnf/yum/zypper), instala `wazuh-agent` y lo enrola en
+el grupo `unix`, y luego deja el equipo listo para respuesta activa:
+
+- Copia la respuesta activa portada a Linux: `firewall-block.py` (bloqueo de IP
+  con **iptables/ip6tables**) y `remove-threat.py`, en `/var/ossec/active-response/bin`.
+- La detección de **fuerza bruta** se apoya en los logs de autenticación SSH
+  (`/var/log/auth.log` o `/var/log/secure`), que Wazuh recoge por defecto (no hace
+  falta `auditpol`, que es de Windows).
+- Añade la recolección de **Suricata** (`/var/log/suricata/eve.json`) al `ossec.conf`.
+- Añade las **carpetas FIM extra** indicadas con `-f` (vigilancia en tiempo real).
+- Reinicia el servicio y hace un **test de puertos 1514/1515**.
+- `--force` purga cualquier instalación previa para una instalación limpia.
+
+**Agente de Red / Suricata (Linux)** — `Agente-Red-Linux/install-suricata.sh`
+(instala **antes** el de monitorización):
+
+```bash
+sudo ./install-suricata.sh [-i eth0] [-H 192.168.0.0/16]
+```
+
+Instala Suricata, descarga las reglas (`suricata-update`), lo configura sobre la
+interfaz indicada (o la de la ruta por defecto), y engancha la recolección del
+`eve.json` al agente Wazuh (que es quien pertenece al grupo `unix` y reenvía al
+manager).
+
+> Los scripts de respuesta activa de Linux se editan en
+> `Agente-Monitorizacion-Linux/active-response/`. Requieren Python 3 en el equipo
+> destino (se ejecutan como scripts, no se compilan).
 
 ---
 
@@ -206,12 +279,17 @@ AgentInstaller\
 │  ├─ src\        (código de la aplicación)
 │  ├─ Resources\  (logo, icono, instalador embebido)
 │  └─ dist\       (InstaladorAgente.exe tras compilar)
-└─ Agente-Red\                     ← instalador del agente de red (IDS)
-   ├─ build.ps1  sign.ps1  branding.json
-   ├─ Instalador.csproj / .sln
-   ├─ src\
-   ├─ Resources\ (logo, icono, script de instalación embebido)
-   └─ dist\       (InstaladorAgenteRed.exe tras compilar)
+├─ Agente-Red\                     ← instalador del agente de red (IDS) — Windows
+│  ├─ build.ps1  sign.ps1  branding.json
+│  ├─ Instalador.csproj / .sln
+│  ├─ src\
+│  ├─ Resources\ (logo, icono, script de instalación embebido)
+│  └─ dist\       (InstaladorAgenteRed.exe tras compilar)
+├─ Agente-Monitorizacion-Linux\    ← instalador del agente de monitorización — Linux
+│  ├─ install-agent.sh             (script silencioso, grupo unix)
+│  └─ active-response\             (firewall-block.py [iptables], remove-threat.py)
+└─ Agente-Red-Linux\               ← instalador del agente de red (Suricata) — Linux
+   └─ install-suricata.sh          (script silencioso)
 ```
 
 ---

@@ -15,12 +15,17 @@ namespace WazuhAgentInstaller
         private const string MsiResourceName = "wazuh-agent.msi";
         // Nombre del servicio Windows del agente Wazuh.
         private const string ServiceName = "WazuhSvc";
+        // GUID de la subcategoria "Inicio de sesion" (evento 4625). Funciona en
+        // cualquier idioma de Windows.
+        private const string AuditLogonGuid = "{0CCE9215-69AE-11D9-BED3-505054503030}";
 
         private readonly string _baseDir;
         private readonly Branding _brand;
 
         private TextBox txtIp;
         private TextBox txtName;
+        private CheckBox chkFim;
+        private TextBox txtFimFolders;
         private TextBox txtLog;
         private Button btnInstall;
         private Label lblStatus;
@@ -39,7 +44,7 @@ namespace WazuhAgentInstaller
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
-            ClientSize = new Size(560, 560);
+            ClientSize = new Size(560, 660);
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9F);
             try
@@ -57,7 +62,6 @@ namespace WazuhAgentInstaller
             var header = new Panel { Dock = DockStyle.Top, Height = 130, BackColor = _brand.Header };
             Controls.Add(header);
 
-            // Franja de acento inferior en la cabecera
             var accentStrip = new Panel { Dock = DockStyle.Bottom, Height = 4, BackColor = _brand.Accent };
             header.Controls.Add(accentStrip);
 
@@ -94,7 +98,7 @@ namespace WazuhAgentInstaller
             };
             header.Controls.Add(lblSub);
 
-            int x = 30, y = 155, w = 500;
+            int x = 30, y = 148, w = 500;
 
             AddLabel(_brand.ManagerLabel + " *", x, y);
             txtIp = new TextBox { Location = new Point(x, y + 22), Width = w, Font = new Font("Segoe UI", 11F) };
@@ -102,17 +106,55 @@ namespace WazuhAgentInstaller
             if (_brand.LockManagerIp && !string.IsNullOrEmpty(_brand.DefaultManagerIp))
                 txtIp.ReadOnly = true;
             Controls.Add(txtIp);
-            y += 70;
+            y += 66;
 
             AddLabel("Nombre del agente (opcional, por defecto el del equipo)", x, y);
             txtName = new TextBox { Location = new Point(x, y + 22), Width = w, Font = new Font("Segoe UI", 11F) };
             txtName.Text = Environment.MachineName;
             Controls.Add(txtName);
-            y += 70;
+            y += 62;
+
+            // ----- Opcion: carpetas extra a vigilar por FIM -----
+            chkFim = new CheckBox
+            {
+                Text = "Vigilar carpetas extra con FIM (integridad de archivos)",
+                Location = new Point(x, y),
+                Width = w,
+                AutoSize = true,
+                ForeColor = _brand.Primary,
+                Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold)
+            };
+            chkFim.CheckedChanged += (s, e) => { txtFimFolders.Enabled = chkFim.Checked; };
+            Controls.Add(chkFim);
+            y += 26;
+
+            txtFimFolders = new TextBox
+            {
+                Location = new Point(x, y),
+                Width = w,
+                Height = 56,
+                Multiline = true,
+                Enabled = false,
+                ScrollBars = ScrollBars.Vertical,
+                Font = new Font("Consolas", 9F)
+            };
+            Controls.Add(txtFimFolders);
+            y += 60;
+
+            var lblFimHint = new Label
+            {
+                Text = "Una carpeta por linea. Ej: C:\\datos   D:\\compartida",
+                Location = new Point(x, y),
+                Width = w,
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8F)
+            };
+            Controls.Add(lblFimHint);
+            y += 24;
 
             btnInstall = new Button
             {
-                Text = "Instalar agente",
+                Text = "Instalar y configurar agente",
                 Location = new Point(x, y),
                 Width = w,
                 Height = 42,
@@ -125,7 +167,7 @@ namespace WazuhAgentInstaller
             btnInstall.FlatAppearance.BorderSize = 0;
             btnInstall.Click += OnInstallClick;
             Controls.Add(btnInstall);
-            y += 55;
+            y += 52;
 
             progress = new ProgressBar
             {
@@ -137,7 +179,7 @@ namespace WazuhAgentInstaller
                 Visible = false
             };
             Controls.Add(progress);
-            y += 24;
+            y += 22;
 
             lblStatus = new Label
             {
@@ -148,7 +190,7 @@ namespace WazuhAgentInstaller
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold)
             };
             Controls.Add(lblStatus);
-            y += 26;
+            y += 24;
 
             txtLog = new TextBox
             {
@@ -162,7 +204,7 @@ namespace WazuhAgentInstaller
                 Font = new Font("Consolas", 8.5F)
             };
             Controls.Add(txtLog);
-            y += 128;
+            y += 126;
 
             var lblSupport = new Label
             {
@@ -207,6 +249,8 @@ namespace WazuhAgentInstaller
             btnInstall.Enabled = !busy;
             txtIp.Enabled = !busy && !(_brand.LockManagerIp && !string.IsNullOrEmpty(_brand.DefaultManagerIp));
             txtName.Enabled = !busy;
+            chkFim.Enabled = !busy;
+            txtFimFolders.Enabled = !busy && chkFim.Checked;
             progress.Visible = busy;
             progress.MarqueeAnimationSpeed = busy ? 30 : 0;
         }
@@ -215,6 +259,8 @@ namespace WazuhAgentInstaller
         {
             string ip = (txtIp.Text ?? "").Trim();
             string name = (txtName.Text ?? "").Trim();
+            string[] fim = chkFim.Checked ? (txtFimFolders.Text ?? "").Split(new[] { '\r', '\n' },
+                              StringSplitOptions.RemoveEmptyEntries) : new string[0];
 
             if (string.IsNullOrEmpty(ip))
             {
@@ -234,12 +280,12 @@ namespace WazuhAgentInstaller
 
             SetBusy(true);
             SetStatus("Instalando...", _brand.Primary);
-            var t = new Thread(() => RunInstall(ip, name));
+            var t = new Thread(() => RunInstall(ip, name, fim));
             t.IsBackground = true;
             t.Start();
         }
 
-        private void RunInstall(string ip, string name)
+        private void RunInstall(string ip, string name, string[] fimFolders)
         {
             try
             {
@@ -252,8 +298,6 @@ namespace WazuhAgentInstaller
 
                 if (folder && service)
                 {
-                    // Ya hay un agente instalado (p.ej. con una IP incorrecta anterior).
-                    // Se ofrece reinstalar limpio para dejarlo correcto.
                     if (!AskYesNo(
                             "Ya hay un agente instalado en este equipo.\n\n" +
                             "Se desinstalara el actual y se instalara de nuevo apuntando a " + ip + ".\n\n" +
@@ -268,13 +312,11 @@ namespace WazuhAgentInstaller
                 }
                 else if (folder || service)
                 {
-                    // Restos de una instalacion anterior fallida: se limpian sin preguntar.
                     Log("Detectados restos de una instalacion anterior. Limpiando automaticamente...");
                     CleanUninstall(msiPath);
                 }
 
-                // 2) Instalar. Si falla, limpiar los restos y reintentar UNA vez,
-                //    para que el usuario no tenga que borrar la carpeta ossec-agent a mano.
+                // 2) Instalar. Si falla, limpiar los restos y reintentar UNA vez.
                 int code = InstallMsi(msiPath, ip, name);
                 if (code != 0 && code != 3010)
                 {
@@ -291,16 +333,29 @@ namespace WazuhAgentInstaller
                 }
 
                 Log("Iniciando servicio " + ServiceName + "...");
-                RunProcess("net.exe", "start " + ServiceName); // no-fatal si ya esta iniciado
+                RunProcess("net.exe", "start " + ServiceName); // dispara el enrolamiento
 
-                // Borra solo la copia temporal del MSI (no un MSI puesto junto al exe).
+                // Borra solo la copia temporal del MSI.
                 if (msiPath.StartsWith(Path.GetTempPath(), StringComparison.OrdinalIgnoreCase))
                     try { File.Delete(msiPath); } catch { }
 
-                SetStatus("Instalacion completada correctamente.", Color.FromArgb(0, 128, 0));
-                Log("Agente instalado y apuntando al manager " + ip + ".");
+                // 3) Dejar el equipo listo para respuesta activa (AR, auditoria,
+                //    Suricata, FIM extra) y reiniciar el servicio.
+                Provision(ip, fimFolders);
+
+                // 4) Test de conectividad con el manager (avisa si la IP es incorrecta).
+                PortTest(ip);
+
+                SetStatus("Instalacion y configuracion completadas.", Color.FromArgb(0, 128, 0));
+                Log("Agente instalado, configurado y apuntando al manager " + ip + ".");
                 Invoke(new Action(() => MessageBox.Show(this,
-                    "El agente se instalo correctamente y esta conectado al manager " + ip + ".",
+                    "El agente se instalo y configuro correctamente:\n" +
+                    " - Registrado en el grupo '" + _brand.AgentGroup + "'\n" +
+                    " - Respuesta activa lista (bloqueo de IP y borrado de amenazas)\n" +
+                    " - Auditoria de logins fallidos (4625) habilitada\n" +
+                    " - Recoleccion de Suricata configurada\n\n" +
+                    "Manager: " + ip + "\n\n" +
+                    "Revisa el registro de la ventana para ver el detalle y el test de puertos.",
                     "Instalacion completada", MessageBoxButtons.OK, MessageBoxIcon.Information)));
             }
             catch (Exception ex)
@@ -316,6 +371,192 @@ namespace WazuhAgentInstaller
                 SetBusy(false);
             }
         }
+
+        // ================== PROVISION (respuesta activa + monitorizacion) ==================
+
+        private void Provision(string ip, string[] fimFolders)
+        {
+            string dir = InstallDir();
+            if (dir == null)
+            {
+                Log("Aviso: no se encuentra la carpeta del agente; se omite la configuracion.");
+                return;
+            }
+
+            Log("Configurando respuesta activa y monitorizacion...");
+
+            // Copiar los binarios de respuesta activa a active-response\bin
+            CopyActiveResponse(dir);
+
+            // Habilitar auditoria de inicios de sesion fallidos (evento 4625)
+            Log("Habilitando auditoria de inicios de sesion fallidos (4625)...");
+            int ap = RunProcess("auditpol.exe",
+                "/set /subcategory:\"" + AuditLogonGuid + "\" /failure:enable");
+            Log("auditpol finalizo con codigo " + ap);
+
+            // ossec.conf: recoleccion de Suricata + carpetas FIM extra
+            PatchOssecConf(dir, fimFolders);
+
+            // Reiniciar el servicio para aplicar la configuracion
+            Log("Reiniciando servicio " + ServiceName + " para aplicar la configuracion...");
+            RunProcessQuiet("net.exe", "stop " + ServiceName);
+            Thread.Sleep(2000);
+            RunProcess("net.exe", "start " + ServiceName);
+        }
+
+        // Copia los .exe de respuesta activa (embebidos) a active-response\bin.
+        private void CopyActiveResponse(string agentDir)
+        {
+            var names = ReadArManifest();
+            if (names.Count == 0)
+            {
+                Log("Aviso: no hay binarios de respuesta activa embebidos (se omite la copia).");
+                return;
+            }
+            string binDir = Path.Combine(agentDir, @"active-response\bin");
+            try { Directory.CreateDirectory(binDir); } catch { }
+
+            var asm = Assembly.GetExecutingAssembly();
+            foreach (var n in names)
+            {
+                try
+                {
+                    using (var s = asm.GetManifestResourceStream("ar/" + n))
+                    {
+                        if (s == null) { Log("Aviso: recurso AR no encontrado: " + n); continue; }
+                        string outp = Path.Combine(binDir, n);
+                        using (var fs = new FileStream(outp, FileMode.Create, FileAccess.Write))
+                            s.CopyTo(fs);
+                        Log("Respuesta activa: copiado " + n);
+                    }
+                }
+                catch (Exception ex) { Log("Aviso: no se pudo copiar " + n + ": " + ex.Message); }
+            }
+        }
+
+        // Lee el manifiesto embebido con los nombres de los .exe de respuesta activa.
+        private System.Collections.Generic.List<string> ReadArManifest()
+        {
+            var list = new System.Collections.Generic.List<string>();
+            try
+            {
+                var asm = Assembly.GetExecutingAssembly();
+                using (var s = asm.GetManifestResourceStream("ar-manifest.txt"))
+                {
+                    if (s == null) return list;
+                    using (var r = new StreamReader(s))
+                    {
+                        string line;
+                        while ((line = r.ReadLine()) != null)
+                        {
+                            line = line.Trim();
+                            if (line.Length > 0) list.Add(line);
+                        }
+                    }
+                }
+            }
+            catch { }
+            return list;
+        }
+
+        // Anade al ossec.conf del agente la recoleccion de Suricata y las carpetas
+        // FIM extra, sin duplicar si ya existen. Se anaden como bloques ossec_config
+        // adicionales al final (Wazuh los combina).
+        private void PatchOssecConf(string agentDir, string[] fimFolders)
+        {
+            string conf = Path.Combine(agentDir, "ossec.conf");
+            if (!File.Exists(conf))
+            {
+                Log("Aviso: no se encontro ossec.conf; se omite su configuracion.");
+                return;
+            }
+
+            string text;
+            try { text = File.ReadAllText(conf); }
+            catch (Exception ex) { Log("No se pudo leer ossec.conf: " + ex.Message); return; }
+
+            var sb = new StringBuilder();
+
+            // Recoleccion de Suricata (eve.json) si no esta ya presente.
+            if (text.IndexOf("eve.json", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                sb.Append("\r\n<ossec_config>\r\n");
+                sb.Append("  <localfile>\r\n");
+                sb.Append("    <log_format>json</log_format>\r\n");
+                sb.Append("    <location>").Append(_brand.SuricataEveLog).Append("</location>\r\n");
+                sb.Append("  </localfile>\r\n");
+                sb.Append("</ossec_config>\r\n");
+                Log("ossec.conf: anadida recoleccion de Suricata (" + _brand.SuricataEveLog + ").");
+            }
+            else
+            {
+                Log("ossec.conf: Suricata ya presente (no se duplica).");
+            }
+
+            // Carpetas FIM extra.
+            if (fimFolders != null && fimFolders.Length > 0)
+            {
+                var toAdd = new System.Collections.Generic.List<string>();
+                foreach (var raw in fimFolders)
+                {
+                    string folder = (raw ?? "").Trim();
+                    if (folder.Length == 0) continue;
+                    if (text.IndexOf(folder, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        Log("FIM: '" + folder + "' ya vigilada (no se duplica).");
+                        continue;
+                    }
+                    if (!toAdd.Contains(folder)) toAdd.Add(folder);
+                }
+                if (toAdd.Count > 0)
+                {
+                    sb.Append("\r\n<ossec_config>\r\n  <syscheck>\r\n");
+                    foreach (var folder in toAdd)
+                    {
+                        sb.Append("    <directories realtime=\"yes\" check_all=\"yes\">")
+                          .Append(folder).Append("</directories>\r\n");
+                        Log("FIM: vigilando en tiempo real " + folder);
+                    }
+                    sb.Append("  </syscheck>\r\n</ossec_config>\r\n");
+                }
+            }
+
+            if (sb.Length > 0)
+            {
+                try { File.AppendAllText(conf, sb.ToString()); Log("ossec.conf actualizado."); }
+                catch (Exception ex) { Log("No se pudo escribir ossec.conf: " + ex.Message); }
+            }
+        }
+
+        // Comprueba si los puertos del manager estan accesibles (avisa si la IP falla).
+        private void PortTest(string ip)
+        {
+            Log("Comprobando conectividad con el manager " + ip + " (puertos 1514/1515)...");
+            bool p1514 = TestTcp(ip, 1514, 3000);
+            bool p1515 = TestTcp(ip, 1515, 3000);
+            Log("  Puerto 1514 (datos)    : " + (p1514 ? "accesible" : "NO accesible"));
+            Log("  Puerto 1515 (registro) : " + (p1515 ? "accesible" : "NO accesible"));
+            if (!p1514 || !p1515)
+                Log("AVISO: revisa la IP del manager y el firewall. Si la IP es incorrecta, el agente no conectara.");
+        }
+
+        private static bool TestTcp(string host, int port, int timeoutMs)
+        {
+            try
+            {
+                using (var c = new System.Net.Sockets.TcpClient())
+                {
+                    var ar = c.BeginConnect(host, port, null, null);
+                    bool ok = ar.AsyncWaitHandle.WaitOne(timeoutMs);
+                    if (!ok) return false;
+                    c.EndConnect(ar);
+                    return c.Connected;
+                }
+            }
+            catch { return false; }
+        }
+
+        // ================== INSTALACION / LIMPIEZA ==================
 
         // Extrae el MSI embebido a una carpeta temporal. Si no hay MSI embebido,
         // busca wazuh-agent.msi junto al .exe como alternativa.
@@ -339,7 +580,6 @@ namespace WazuhAgentInstaller
                                 "situado como 'wazuh-agent.msi' junto al ejecutable.");
         }
 
-        // Posibles carpetas de instalacion del agente.
         private static readonly string[] InstallDirs =
         {
             @"C:\Program Files (x86)\ossec-agent",
@@ -360,6 +600,8 @@ namespace WazuhAgentInstaller
         }
 
         // Ejecuta la instalacion del MSI y devuelve el codigo de salida.
+        // Registra el agente en el grupo configurado (por defecto "windows") para
+        // recibir la configuracion FIM centralizada del manager.
         private int InstallMsi(string msiPath, string ip, string name)
         {
             string logPath = Path.Combine(Path.GetTempPath(), "wazuh-install.log");
@@ -370,6 +612,8 @@ namespace WazuhAgentInstaller
             args.Append(" /l*v \"").Append(logPath).Append("\"");
             args.Append(" WAZUH_MANAGER=\"").Append(ip).Append("\"");
             args.Append(" WAZUH_REGISTRATION_SERVER=\"").Append(ip).Append("\"");
+            if (!string.IsNullOrEmpty(_brand.AgentGroup))
+                args.Append(" WAZUH_AGENT_GROUP=\"").Append(_brand.AgentGroup).Append("\"");
             if (!string.IsNullOrEmpty(name))
                 args.Append(" WAZUH_AGENT_NAME=\"").Append(name).Append("\"");
 
@@ -384,9 +628,7 @@ namespace WazuhAgentInstaller
             return code;
         }
 
-        // Desinstala por completo cualquier resto del agente: para el servicio,
-        // desinstala el producto (por MSI y por codigo de producto) y borra la
-        // carpeta que quede. Asi el usuario nunca tiene que limpiar a mano.
+        // Desinstala por completo cualquier resto del agente.
         private void CleanUninstall(string msiPath)
         {
             Log("Limpiando instalacion previa del agente...");
@@ -394,22 +636,18 @@ namespace WazuhAgentInstaller
             RunProcessQuiet("sc.exe", "stop " + ServiceName);
             Thread.Sleep(2000);
 
-            // Desinstalar por el propio MSI (misma version embebida).
             string ulog = Path.Combine(Path.GetTempPath(), "wazuh-uninstall.log");
             RunProcessQuiet("msiexec.exe", "/x \"" + msiPath + "\" /qn /norestart /l*v \"" + ulog + "\"");
 
-            // Desinstalar por codigo de producto del registro (por si la version difiere).
             foreach (string productCode in FindWazuhProductCodes())
             {
                 Log("Desinstalando producto " + productCode + " ...");
                 RunProcessQuiet("msiexec.exe", "/x " + productCode + " /qn /norestart");
             }
 
-            // Eliminar el servicio si aun existiera.
             RunProcessQuiet("sc.exe", "delete " + ServiceName);
             Thread.Sleep(1000);
 
-            // Eliminar la carpeta restante.
             string dir = InstallDir();
             if (dir != null)
             {
@@ -420,7 +658,6 @@ namespace WazuhAgentInstaller
             Log("Limpieza completada.");
         }
 
-        // Busca en el registro los codigos de producto (GUID) del agente Wazuh.
         private System.Collections.Generic.List<string> FindWazuhProductCodes()
         {
             var list = new System.Collections.Generic.List<string>();
@@ -462,7 +699,6 @@ namespace WazuhAgentInstaller
             return list;
         }
 
-        // Pregunta Si/No en el hilo de la interfaz.
         private bool AskYesNo(string message, string title)
         {
             bool result = false;
@@ -474,7 +710,6 @@ namespace WazuhAgentInstaller
             return result;
         }
 
-        // Ejecuta un proceso sin volcar su salida al registro; devuelve el codigo.
         private int RunProcessQuiet(string file, string arguments)
         {
             try
@@ -499,14 +734,12 @@ namespace WazuhAgentInstaller
             catch { return -1; }
         }
 
-        // Lee el log verboso de msiexec y muestra las lineas relevantes del fallo.
         private void DumpMsiError(string logPath)
         {
             try
             {
                 if (!File.Exists(logPath)) return;
                 string[] lines;
-                // El log de msiexec suele ir en UTF-16.
                 try { lines = File.ReadAllLines(logPath, Encoding.Unicode); }
                 catch { lines = File.ReadAllLines(logPath); }
 

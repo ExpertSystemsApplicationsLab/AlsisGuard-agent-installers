@@ -1,0 +1,4 @@
+# Los scripts de shell y Python de Linux deben mantener saltos de linea LF
+# aunque el repositorio se clone en Windows.
+*.sh   text eol=lf
+*.py   text eol=lf

@@ -9,5 +9,7 @@
   "headerColor": "#FFFFFF",
   "managerLabel": "IP o dominio del sistema central",
   "supportText": "Soporte: oficina@alsisiot.com",
-  "logoFile": "logo.png"
+  "logoFile": "logo.png",
+  "agentGroup": "windows",
+  "suricataEveLog": "C:\\Program Files\\Suricata\\log\\eve.json"
 }

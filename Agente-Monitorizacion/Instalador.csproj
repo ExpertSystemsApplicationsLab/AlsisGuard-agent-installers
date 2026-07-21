@@ -46,6 +46,16 @@
     <EmbeddedResource Include="Resources\app.ico">
       <LogicalName>app.ico</LogicalName>
     </EmbeddedResource>
+    <!-- Respuesta activa (generados por build.ps1 a partir de active-response\src\*.py) -->
+    <EmbeddedResource Include="Resources\active-response\ar-manifest.txt" Condition="Exists('Resources\active-response\ar-manifest.txt')">
+      <LogicalName>ar-manifest.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\active-response\bin\netsh-block.exe" Condition="Exists('Resources\active-response\bin\netsh-block.exe')">
+      <LogicalName>ar/netsh-block.exe</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\active-response\bin\remove-threat.exe" Condition="Exists('Resources\active-response\bin\remove-threat.exe')">
+      <LogicalName>ar/remove-threat.exe</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# Artefactos de compilación de Windows
+**/obj/
+**/bin/Debug/
+**/.vs/
+
+# Artefactos de PyInstaller (respuesta activa Windows)
+**/active-response/bin/*.exe
+**/Resources/active-response/bin/*.exe
+**/Resources/active-response/ar-manifest.txt
+**/build/
+**/*.spec

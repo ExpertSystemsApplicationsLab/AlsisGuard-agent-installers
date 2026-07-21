@@ -21,6 +21,10 @@ namespace WazuhAgentInstaller
         public string ManagerLabel = "IP o dominio del sistema central";
         public string SupportText = "";
         public string LogoFile = "logo.png";
+        // Grupo de enrolamiento para recibir la configuracion FIM centralizada del manager.
+        public string AgentGroup = "windows";
+        // Ruta del log de Suricata que recolectara el agente.
+        public string SuricataEveLog = @"C:\Program Files\Suricata\log\eve.json";
 
         public Color Primary { get { return FromHex(PrimaryColor, Color.FromArgb(23, 42, 69)); } }
         public Color Accent { get { return FromHex(AccentColor, Color.FromArgb(94, 200, 229)); } }
@@ -57,6 +61,8 @@ namespace WazuhAgentInstaller
                     b.ManagerLabel   = GetJson(txt, "managerLabel",   b.ManagerLabel);
                     b.SupportText    = GetJson(txt, "supportText",    b.SupportText);
                     b.LogoFile       = GetJson(txt, "logoFile",       b.LogoFile);
+                    b.AgentGroup     = GetJson(txt, "agentGroup",     b.AgentGroup);
+                    b.SuricataEveLog = GetJson(txt, "suricataEveLog", b.SuricataEveLog);
                 }
             }
             catch { /* usa valores por defecto */ }

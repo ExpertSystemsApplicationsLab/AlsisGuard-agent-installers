@@ -388,6 +388,9 @@ namespace WazuhAgentInstaller
             // Copiar los binarios de respuesta activa a active-response\bin
             CopyActiveResponse(dir);
 
+            // Asegurar que la respuesta activa esta habilitada en el agente
+            EnsureActiveResponse(dir);
+
             // Habilitar auditoria de inicios de sesion fallidos (evento 4625)
             Log("Habilitando auditoria de inicios de sesion fallidos (4625)...");
             int ap = RunProcess("auditpol.exe",
@@ -432,6 +435,31 @@ namespace WazuhAgentInstaller
                 }
                 catch (Exception ex) { Log("Aviso: no se pudo copiar " + n + ": " + ex.Message); }
             }
+        }
+
+        // Asegura que la respuesta activa esta habilitada en el ossec.conf del agente
+        // (para que el agente ejecute las ordenes de AR que reciba). El agente Wazuh
+        // ya la trae habilitada por defecto; solo se anade el bloque si no existiera.
+        private void EnsureActiveResponse(string agentDir)
+        {
+            string conf = Path.Combine(agentDir, "ossec.conf");
+            if (!File.Exists(conf)) return;
+            try
+            {
+                string text = File.ReadAllText(conf);
+                if (text.IndexOf("<active-response>", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    File.AppendAllText(conf,
+                        "\r\n<ossec_config>\r\n  <active-response>\r\n    <disabled>no</disabled>\r\n" +
+                        "  </active-response>\r\n</ossec_config>\r\n");
+                    Log("ossec.conf: respuesta activa habilitada en el agente.");
+                }
+                else
+                {
+                    Log("ossec.conf: respuesta activa ya habilitada en el agente.");
+                }
+            }
+            catch (Exception ex) { Log("No se pudo verificar la respuesta activa: " + ex.Message); }
         }
 
         // Lee el manifiesto embebido con los nombres de los .exe de respuesta activa.

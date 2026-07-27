@@ -146,9 +146,10 @@ Si estos archivos no están junto al `.exe`, se usan los valores y el logo
 Además de instalar el agente, deja el equipo **listo para respuesta activa**:
 
 - Registra el agente en el grupo `windows` (config FIM centralizada del manager).
-- Copia los binarios de respuesta activa (`netsh-block.exe` para bloquear la IP
-  atacante en el firewall, y `remove-threat.exe` para borrar archivos maliciosos)
-  a `active-response\bin`.
+- Copia los binarios de respuesta activa a `active-response\bin`: `netsh-block.exe`
+  (bloquea la IP atacante en el firewall), `netsh-unblock.exe` (levanta el baneo
+  bajo demanda) y `remove-threat.exe` (borra archivos maliciosos), y deja la
+  **respuesta activa habilitada** en el `ossec.conf` del agente.
 - Habilita la auditoría de inicios de sesión fallidos (evento **4625**), necesaria
   para detectar fuerza bruta.
 - Añade al `ossec.conf` la recolección del log de **Suricata** (`eve.json`).
@@ -161,8 +162,13 @@ instalación fallida, los limpia solo; y si la instalación falla, limpia y
 reintenta una vez.
 
 Los scripts de respuesta activa se editan en `Agente-Monitorizacion\active-response\src\`
-(`netsh-block.py`, `remove-threat.py`) y `build.ps1` los recompila a `.exe`
-automáticamente.
+(`netsh-block.py`, `netsh-unblock.py`, `remove-threat.py`) y `build.ps1` los
+recompila a `.exe` automáticamente (embebe todos los `.py` que encuentre ahí).
+
+> El instalador deja el **agente** listo para respuesta activa (binarios + AR
+> habilitada). La regla que dispara cada acción (p. ej. bloquear ante fuerza
+> bruta) y el desbloqueo bajo demanda por API se definen en el **manager**; eso
+> queda fuera de estos instaladores, que solo configuran los agentes.
 
 ### 6.2 Agente de Red
 
@@ -201,8 +207,11 @@ sudo ./install-agent.sh -m <IP_DEL_MANAGER> [-n nombre] [-g unix] \
 Detecta la distribución (apt/dnf/yum/zypper), instala `wazuh-agent` y lo enrola en
 el grupo `unix`, y luego deja el equipo listo para respuesta activa:
 
-- Copia la respuesta activa portada a Linux: `firewall-block.py` (bloqueo de IP
-  con **iptables/ip6tables**) y `remove-threat.py`, en `/var/ossec/active-response/bin`.
+- Copia la respuesta activa portada a Linux en `/var/ossec/active-response/bin`:
+  `firewall-block.py` (bloqueo de IP con **iptables/ip6tables**),
+  `firewall-unblock.py` (levanta el baneo bajo demanda) y `remove-threat.py`
+  (con permisos `root:wazuh`), y deja la **respuesta activa habilitada** en el
+  `ossec.conf` del agente.
 - La detección de **fuerza bruta** se apoya en los logs de autenticación SSH
   (`/var/log/auth.log` o `/var/log/secure`), que Wazuh recoge por defecto (no hace
   falta `auditpol`, que es de Windows).

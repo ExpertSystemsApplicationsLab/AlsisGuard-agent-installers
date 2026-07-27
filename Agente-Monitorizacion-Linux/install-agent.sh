@@ -168,7 +168,7 @@ copy_active_response() {
     log "Instalando scripts de respuesta activa..."
     mkdir -p "$AR_BIN"
     local copied=0
-    for f in firewall-block.py remove-threat.py; do
+    for f in firewall-block.py firewall-unblock.py remove-threat.py; do
         if [[ -f "${SCRIPT_DIR}/active-response/${f}" ]]; then
             cp "${SCRIPT_DIR}/active-response/${f}" "${AR_BIN}/${f}"
             chmod 750 "${AR_BIN}/${f}"
@@ -223,6 +223,24 @@ EOF
     fi
 }
 
+# -------- Asegurar respuesta activa habilitada en el agente --------
+ensure_active_response() {
+    [[ -f "$OSSEC_CONF" ]] || return
+    if ! grep -q "<active-response>" "$OSSEC_CONF"; then
+        cat >> "$OSSEC_CONF" <<EOF
+
+<ossec_config>
+  <active-response>
+    <disabled>no</disabled>
+  </active-response>
+</ossec_config>
+EOF
+        ok "ossec.conf: respuesta activa habilitada en el agente."
+    else
+        log "ossec.conf: respuesta activa ya habilitada en el agente."
+    fi
+}
+
 # -------- Test de puertos --------
 test_port() {
     timeout 3 bash -c ">/dev/tcp/$1/$2" >/dev/null 2>&1 && echo "accesible" || echo "NO accesible"
@@ -256,6 +274,7 @@ else
 fi
 
 copy_active_response
+ensure_active_response
 patch_ossec_conf
 
 log "Reiniciando servicio wazuh-agent para aplicar la configuracion..."

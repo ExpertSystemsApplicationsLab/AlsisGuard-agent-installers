@@ -236,6 +236,35 @@ manager).
 > `Agente-Monitorizacion-Linux/active-response/`. Requieren Python 3 en el equipo
 > destino (se ejecutan como scripts, no se compilan).
 
+### 6.4 Servidor central / Manager (Ubuntu)
+
+El **manager** es el servidor central (donde se instala Wazuh completo: manager +
+indexer + dashboard) y es quien decide **qué regla dispara cada respuesta activa**,
+la integración con **VirusTotal** y las reglas personalizadas. En `Manager-Linux/`
+hay un script que lo deja todo montado:
+
+```bash
+sudo ./install-manager.sh --admin-ip <TU_IP_PUBLICA_DE_ADMIN>
+```
+
+Qué hace:
+
+1. Si Wazuh no está instalado, ejecuta el instalador oficial *all-in-one*.
+2. Aplica el `ossec.conf` y el `local_rules.xml` de AlsisGuard (los ficheros que
+   acompañan al script), con copia de seguridad de los anteriores.
+3. Con `--admin-ip` añade tu IP a la **lista blanca** de respuesta activa (evita
+   que te auto-bloquees del SSH del propio servidor).
+4. Valida la configuración (`wazuh-analysisd -t`) y reinicia el manager.
+
+Esta configuración incluye: bloqueo de IP por fuerza bruta SSH/Windows
+(`firewall-drop` y `netsh-block`), deshabilitar cuenta atacada, borrado de malware
+detectado por VirusTotal (regla 87105), reglas IOC de IPs maliciosas y detección
+de fuerza bruta de OpenSSH en Windows.
+
+> **Antes de usarlo en producción, revisa** `ossec.conf`: pon tu **API key de
+> VirusTotal**, tu **IP de administración** en la lista blanca, y confirma el
+> `rules_id` de bloqueo de Windows (ver notas más abajo).
+
 ---
 
 ## 7. Verificar que funciona
@@ -297,8 +326,12 @@ AgentInstaller\
 ├─ Agente-Monitorizacion-Linux\    ← instalador del agente de monitorización — Linux
 │  ├─ install-agent.sh             (script silencioso, grupo unix)
 │  └─ active-response\             (firewall-block.py [iptables], remove-threat.py)
-└─ Agente-Red-Linux\               ← instalador del agente de red (Suricata) — Linux
-   └─ install-suricata.sh          (script silencioso)
+├─ Agente-Red-Linux\               ← instalador del agente de red (Suricata) — Linux
+│  └─ install-suricata.sh          (script silencioso)
+└─ Manager-Linux\                  ← servidor central (Wazuh manager) — Ubuntu
+   ├─ install-manager.sh           (instala Wazuh y aplica la config)
+   ├─ ossec.conf                   (config del manager: AR, VirusTotal, listas)
+   └─ local_rules.xml              (reglas personalizadas: VT, IOC, brute force)
 ```
 
 ---

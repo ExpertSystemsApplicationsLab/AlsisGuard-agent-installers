@@ -24,6 +24,9 @@
 #    -s, --suricata-log <ruta> Ruta del eve.json de Suricata
 #                              (def: /var/log/suricata/eve.json)
 #        --force               Purga la instalacion previa y hace instalacion limpia
+#        --skip-install        NO instala el paquete (asume wazuh-agent ya instalado);
+#                              solo aplica la configuracion/respuesta activa. Util si
+#                              apt esta roto por otros paquetes (p. ej. NVIDIA en Jetson).
 #    -h, --help                Ayuda
 #
 #  Tambien acepta variables de entorno: WAZUH_MANAGER, WAZUH_AGENT_GROUP,
@@ -32,6 +35,13 @@
 
 set -euo pipefail
 
+# Instalacion NO interactiva: evita que apt/needrestart abran dialogos que
+# dejan el script "colgado" esperando una tecla.
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+APT_OPTS="-y -o Dpkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+
 # -------- Valores por defecto --------
 MANAGER="${WAZUH_MANAGER:-}"
 GROUP="${WAZUH_AGENT_GROUP:-unix}"
@@ -39,6 +49,7 @@ AGENT_NAME="${WAZUH_AGENT_NAME:-$(hostname)}"
 FIM_DIRS="${FIM_DIRS:-}"
 SURICATA_LOG="${SURICATA_LOG:-/var/log/suricata/eve.json}"
 FORCE=0
+SKIP_INSTALL=0
 
 OSSEC_DIR="/var/ossec"
 OSSEC_CONF="${OSSEC_DIR}/etc/ossec.conf"
@@ -62,6 +73,7 @@ while [[ $# -gt 0 ]]; do
         -f|--fim)          FIM_DIRS="$2"; shift 2 ;;
         -s|--suricata-log) SURICATA_LOG="$2"; shift 2 ;;
         --force)           FORCE=1; shift ;;
+        --skip-install)    SKIP_INSTALL=1; shift ;;
         -h|--help)         usage ;;
         *) err "Opcion desconocida: $1"; exit 1 ;;
     esac
@@ -110,13 +122,22 @@ add_repo() {
     log "Configurando repositorio de Wazuh ($WAZUH_MAJOR)..."
     case "$PKG" in
         apt)
-            apt-get install -y curl gnupg apt-transport-https >/dev/null
-            curl -fsSL https://packages.wazuh.com/key/GPG-KEY-WAZUH \
-                | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import 2>/dev/null
+            log "Instalando dependencias (curl, gnupg)..."
+            apt-get $APT_OPTS install curl gnupg apt-transport-https
+            log "Importando la clave GPG de Wazuh..."
+            rm -f /usr/share/keyrings/wazuh.gpg          # elimina restos corruptos
+            local tmpkey; tmpkey="$(mktemp)"
+            curl -fsSL https://packages.wazuh.com/key/GPG-KEY-WAZUH -o "$tmpkey"
+            [[ -s "$tmpkey" ]] || { err "No se pudo descargar la clave GPG de Wazuh."; exit 1; }
+            # GNUPGHOME temporal (evita el aviso 'unsafe ownership' de /home/*/.gnupg bajo sudo)
+            local gh; gh="$(mktemp -d)"
+            GNUPGHOME="$gh" gpg --batch --yes --dearmor -o /usr/share/keyrings/wazuh.gpg "$tmpkey"
+            rm -rf "$tmpkey" "$gh"
             chmod 644 /usr/share/keyrings/wazuh.gpg
             echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/${WAZUH_MAJOR}/apt/ stable main" \
                 > /etc/apt/sources.list.d/wazuh.list
-            apt-get update -y
+            log "Actualizando indices de apt..."
+            apt-get $APT_OPTS update
             ;;
         dnf|yum)
             rpm --import https://packages.wazuh.com/key/GPG-KEY-WAZUH
@@ -152,7 +173,7 @@ install_agent() {
     export WAZUH_AGENT_NAME="$AGENT_NAME"
     export WAZUH_REGISTRATION_SERVER="$MANAGER"
     case "$PKG" in
-        apt)    apt-get install -y wazuh-agent ;;
+        apt)    apt-get $APT_OPTS install wazuh-agent ;;
         dnf)    dnf install -y wazuh-agent ;;
         yum)    yum install -y wazuh-agent ;;
         zypper) zypper --non-interactive install wazuh-agent ;;
@@ -261,7 +282,17 @@ if agent_installed; then
     fi
 fi
 
-if ! agent_installed || [[ $FORCE -eq 1 ]]; then
+if [[ $SKIP_INSTALL -eq 1 ]]; then
+    if ! agent_installed; then
+        err "Se indico --skip-install pero wazuh-agent no esta instalado."
+        err "Instalalo primero (p. ej. con dpkg -i del .deb) y vuelve a ejecutar."
+        exit 1
+    fi
+    log "--skip-install: se omite la instalacion; solo se aplica configuracion."
+    if [[ -f "$OSSEC_CONF" ]]; then
+        sed -i -E "s#(<address>).*(</address>)#\1${MANAGER}\2#" "$OSSEC_CONF" || true
+    fi
+elif ! agent_installed || [[ $FORCE -eq 1 ]]; then
     add_repo
     install_agent
 else

@@ -14,6 +14,7 @@
 #   (con permiso de ejecucion, propietario root:wazuh)
 # =============================================================================
 
+import re
 import sys
 import json
 import subprocess
@@ -21,6 +22,13 @@ from datetime import datetime
 
 LOG_FILE = "/var/ossec/logs/active-responses.log"
 PROGRAM = "active-response/bin/firewall-block.py"
+
+# Duracion POR DEFECTO del bloqueo en SEGUNDOS. El propio script programa el
+# desbloqueo, asi la IP SIEMPRE se libera pasado este tiempo (aunque reinicies el
+# agente o lo lances a mano). Pon 0 para bloqueo permanente (solo manual).
+# Se puede sobreescribir por invocacion pasando los segundos como argumento
+# (parameters.extra_args, es decir "arguments" en la API). Ej: arguments:["120"].
+BLOCK_SECONDS = 40
 
 # IPs que nunca se deben bloquear
 WHITELIST = {"127.0.0.1", "::1", "-"}
@@ -58,13 +66,69 @@ def emit_json(msg, ip, action):
     write_log(f"{PROGRAM}: {json.dumps(msg, ensure_ascii=False)}")
 
 
-def run_fw(action_flag, ip):
-    """action_flag: '-I' para bloquear, '-D' para desbloquear."""
-    tool = "ip6tables" if is_ipv6(ip) else "iptables"
-    subprocess.run(
-        [tool, action_flag, "INPUT", "-s", ip, "-j", "DROP"],
-        check=False,
-    )
+def _fw_tool(ip):
+    return "ip6tables" if is_ipv6(ip) else "iptables"
+
+
+def valid_ip(ip):
+    """Valida el formato de la IP (evita inyeccion en el proceso programado)."""
+    return bool(re.match(r'^[0-9A-Fa-f:.]{3,45}$', ip or ''))
+
+
+def get_seconds(msg):
+    """Duracion del bloqueo: usa el argumento pasado en la invocacion
+    (parameters.extra_args / 'arguments' de la API) si es un numero; si no,
+    usa BLOCK_SECONDS por defecto."""
+    args = msg.get("parameters", {}).get("extra_args") or []
+    for a in args:
+        try:
+            return int(str(a).strip())
+        except (ValueError, TypeError):
+            continue
+    return BLOCK_SECONDS
+
+
+def schedule_unblock(ip, seconds):
+    """Programa el desbloqueo dentro de 'seconds' segundos con un proceso PROPIO,
+    independiente de Wazuh y que sobrevive a reinicios del agente. Garantiza que
+    el bloqueo caduque siempre pasado el tiempo establecido."""
+    if seconds <= 0 or not valid_ip(ip):
+        return
+    tool = _fw_tool(ip)
+    cmd = ("sleep %d; for i in $(seq 1 20); do "
+           "%s -D INPUT -s %s -j DROP 2>/dev/null || break; done") % (int(seconds), tool, ip)
+    try:
+        subprocess.Popen(
+            ["nohup", "bash", "-c", cmd],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        write_log("%s: desbloqueo programado para %s en %ds" % (PROGRAM, ip, int(seconds)))
+    except Exception as e:
+        write_log("%s: no se pudo programar el desbloqueo de %s: %s" % (PROGRAM, ip, e))
+
+
+def unblock(ip):
+    """Quita TODAS las reglas DROP de esa IP (por si hubiera duplicadas)."""
+    tool = _fw_tool(ip)
+    for _ in range(20):
+        r = subprocess.run(
+            [tool, "-D", "INPUT", "-s", ip, "-j", "DROP"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if r.returncode != 0:
+            break
+
+
+def block(ip):
+    """Bloquea la IP dejando UNA sola regla (limpia duplicados antes)."""
+    unblock(ip)
+    tool = _fw_tool(ip)
+    subprocess.run([tool, "-I", "INPUT", "-s", ip, "-j", "DROP"], check=False)
 
 
 def main():
@@ -84,10 +148,11 @@ def main():
         sys.exit(0)
 
     if command == "add":
-        run_fw("-I", ip)
+        block(ip)
+        schedule_unblock(ip, get_seconds(msg))   # caduca solo pasados los segundos (arg o BLOCK_SECONDS)
         emit_json(msg, ip, "add")
     elif command == "delete":
-        run_fw("-D", ip)
+        unblock(ip)
         emit_json(msg, ip, "delete")
 
     sys.exit(0)

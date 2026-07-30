@@ -1,0 +1,108 @@
+<!-- Local rules -->
+<!-- Modify it at your will. -->
+<!-- Copyright (C) 2015, Wazuh Inc. -->
+<!-- Example -->
+<group name="local,syslog,sshd,">
+  <!--
+  Dec 10 01:02:02 host sshd[1234]: Failed none for root from 1.1.1.1 port 1066 ssh2
+  -->
+  <rule id="100001" level="5">
+    <if_sid>5716</if_sid>
+    <srcip>1.1.1.1</srcip>
+    <description>sshd: authentication failed from IP 1.1.1.1.</description>
+    <group>authentication_failed,pci_dss_10.2.4,pci_dss_10.2.5,</group>
+  </rule>
+</group>
+<!--
+  ============================================================================
+  Reglas personalizadas para disparar la integración con VirusTotal
+  ============================================================================
+  Añadir en el MANAGER, en: /var/ossec/etc/rules/local_rules.xml
+  Estas reglas saltan cuando FIM (syscheck) detecta un fichero NUEVO o
+  MODIFICADO en las carpetas que vigilamos. Su rule_id (100200 / 100201) es
+  el que enlaza la <integration> de VirusTotal en ossec.conf.
+  Ajusta las rutas <field name="file"> a las carpetas que quieras vigilar
+  (Descargas suele ser la más rentable en una pyme).
+  ============================================================================
+-->
+<!-- ALSISGUARD:VT:START (gestionado por Alsis Guard - no editar a mano) -->
+<group name="syscheck,virustotal,">
+  <rule id="100200" level="7">
+    <if_sid>550</if_sid>
+    <field name="file" type="pcre2">(?i)C:[\\/]Users[\\/][^\\/]+[\\/]Downloads|C:[\\/]Users[\\/][^\\/]+[\\/]Desktop|C:[\\/]pruebas_wazuh|C:[\\/]pruebas_sergio|C:[\\/]pruebas_virus_total</field>
+    <description>Fichero modificado en carpeta vigilada - enviar a VirusTotal.</description>
+  </rule>
+  <rule id="100201" level="7">
+    <if_sid>554</if_sid>
+    <field name="file" type="pcre2">(?i)C:[\\/]Users[\\/][^\\/]+[\\/]Downloads|C:[\\/]Users[\\/][^\\/]+[\\/]Desktop|C:[\\/]pruebas_wazuh|C:[\\/]pruebas_sergio|C:[\\/]pruebas_virus_total</field>
+    <description>Fichero añadido en carpeta vigilada - enviar a VirusTotal.</description>
+  </rule>
+</group>
+<!-- ALSISGUARD:VT:END -->
+<!-- ALSISGUARD:VT_LINUX:START (gestionado por Alsis Guard - no editar a mano) -->
+<group name="syscheck,virustotal,">
+  <rule id="100202" level="7">
+    <if_sid>550</if_sid>
+    <field name="file" type="pcre2">(?i)^/home/[^/]+/Downloads|^/home/[^/]+/pruebas_virustotal|^/root/pruebas_virustotal</field>
+    <description>Linux: fichero modificado en carpeta vigilada - enviar a VirusTotal.</description>
+  </rule>
+  <rule id="100203" level="7">
+    <if_sid>554</if_sid>
+    <field name="file" type="pcre2">(?i)^/home/[^/]+/Downloads|^/home/[^/]+/pruebas_virustotal|^/root/pruebas_virustotal</field>
+    <description>Linux: fichero anadido en carpeta vigilada - enviar a VirusTotal.</description>
+  </rule>
+</group>
+<!-- ALSISGUARD:VT_LINUX:END -->
+<!-- ALSISGUARD:IOC:START (gestionado por Alsis Guard - no editar a mano) -->
+<group name="ioc,">
+  <rule id="100300" level="12">
+    <list field="srcip" lookup="address_match_key">etc/lists/malicious-ip</list>
+    <description>IOC: IP maliciosa como origen $(srcip)</description>
+    <group>ioc,malicious_ip,</group>
+  </rule>
+  <rule id="100301" level="12">
+    <list field="dstip" lookup="address_match_key">etc/lists/malicious-ip</list>
+    <description>IOC: conexion hacia IP maliciosa $(dstip)</description>
+    <group>ioc,malicious_ip,</group>
+  </rule>
+</group>
+<!-- ALSISGUARD:IOC:END -->
+<group name="active_response,netsh_block,">
+  <rule id="100400" level="8">
+    <if_sid>657</if_sid>
+    <match>netsh-block</match>
+    <description>Windows: IP $(srcip) baneada por fuerza bruta (netsh-block)</description>
+    <group>attack_response,authentication_failures,</group>
+  </rule>
+</group>
+<group name="attack_response,ip_blocked,">
+  <rule id="100410" level="8">
+    <if_sid>651</if_sid>
+    <description>IP $(srcip) BANEADA por fuerza bruta (firewall-drop)</description>
+  </rule>
+  <rule id="100411" level="3">
+    <if_sid>652</if_sid>
+    <description>IP $(srcip) DESBANEADA (fin del timeout)</description>
+  </rule>
+</group>
+<!-- ============================================================================
+  AÑADIDO: SSH en WINDOWS (OpenSSH)
+  Los demás vectores Windows (SMB/RDP/WinRM/logon) ya los cubre la regla 60204
+  vía evento 4625. Esto cubre el SSH de Windows, que va al canal OpenSSH/Operational.
+  Requiere recoger ese canal en el agente (localfile en agent.conf).
+  ============================================================================ -->
+<group name="windows,openssh,authentication_failures,">
+  <!-- Un intento de login SSH fallido en Windows -->
+  <rule id="100420" level="5">
+    <decoded_as>windows_eventchannel</decoded_as>
+    <field name="win.system.channel">OpenSSH/Operational</field>
+    <field name="win.system.message" type="pcre2">(?i)Failed (password|publickey)|authentication failure|Invalid user</field>
+    <description>Windows OpenSSH: intento de inicio de sesion fallido</description>
+  </rule>
+  <!-- Fuerza bruta SSH Windows: 8 fallos en 120 s -->
+  <rule id="100421" level="10" frequency="8" timeframe="120">
+    <if_matched_sid>100420</if_matched_sid>
+    <description>Windows OpenSSH: fuerza bruta detectada (multiples fallos)</description>
+    <group>authentication_failures,attack,</group>
+  </rule>
+</group>

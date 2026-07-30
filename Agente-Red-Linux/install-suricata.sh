@@ -28,6 +28,11 @@
 
 set -euo pipefail
 
+# Instalacion NO interactiva (evita dialogos de apt/needrestart que cuelgan).
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+
 IFACE="${IFACE:-}"
 HOME_NET="${HOME_NET:-}"
 SURICATA_LOG="${SURICATA_LOG:-/var/log/suricata/eve.json}"

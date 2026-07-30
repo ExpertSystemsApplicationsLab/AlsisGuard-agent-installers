@@ -13,3 +13,6 @@ __pycache__/
 **/Resources/active-response/ar-manifest.txt
 **/build/
 **/*.spec
+
+# Backups / empaquetados
+*.zip
